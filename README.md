@@ -1,4 +1,4 @@
-# pbix-to-pbip
+# pbix-to-pbip w/ Direct Lake
 
 A reusable GitHub Copilot skill for converting Power BI `.pbix` / `.pbip` assets into source-controlled PBIP projects, optionally migrating semantic models to Microsoft Fabric Direct Lake, publishing report/model items to Fabric workspaces, and validating parity against the source report.
 

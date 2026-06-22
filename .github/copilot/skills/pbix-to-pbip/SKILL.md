@@ -35,7 +35,7 @@ If the user configured default and restricted workspaces, ask only: **"Is this p
 
 ## PBIP structure
 
-Expected native PBIP layout:
+Expected native PBIP layout for the enhanced PBIR format:
 
 ```text
 <ReportName>.pbip
@@ -48,6 +48,25 @@ Expected native PBIP layout:
       pages.json
       <pageId>/page.json
       <pageId>/visuals/<visualId>/visual.json
+  StaticResources/
+<ReportName>.SemanticModel/
+  definition.pbism
+  definition/
+    database.tmdl
+    model.tmdl
+    relationships.tmdl
+    expressions.tmdl
+    tables/<TableName>.tmdl
+    cultures/<culture>.tmdl
+```
+
+PBIR-Legacy uses a mutually exclusive report layout:
+
+```text
+<ReportName>.pbip
+<ReportName>.Report/
+  definition.pbir
+  report.json
   StaticResources/
 <ReportName>.SemanticModel/
   definition.pbism
@@ -97,12 +116,12 @@ Classify tables as:
 
 ### 2. Materialize unsupported shaping upstream
 
-Direct Lake tables must bind to physical Delta-backed Fabric entities. SQL views, Import M partitions, and arbitrary native SQL shaping are not enough for `directLakeOnly` models.
+Direct Lake tables must bind to physical Delta-backed Fabric entities. SQL views, Import M partitions, and arbitrary native SQL shaping are not enough for Direct Lake on SQL models that use `directLakeOnly`.
 
 For every shaped Import table:
 
 1. Create a physical Fabric Warehouse/Lakehouse table with equivalent output columns.
-2. Move calculated column logic upstream into that physical table where Direct Lake on SQL/Warehouse cannot support it.
+2. Move calculated column logic upstream into that physical table where the selected Direct Lake mode does not support it.
 3. Preserve display names in TMDL while mapping `sourceColumn` to the materialized source column.
 4. Validate row counts and sample rows against the pre-migration source.
 
@@ -115,9 +134,16 @@ Examples of logic that often needs upstream materialization:
 - date dimension rows for auto date hierarchy replacement
 - M-added columns or type transforms
 
-### 3. Convert model metadata to Direct Lake
+### 3. Choose the Direct Lake mode
 
-Minimum semantic-model changes:
+Before editing TMDL, choose the target Direct Lake mode:
+
+- **Direct Lake on SQL** uses a single Fabric Warehouse/Lakehouse SQL analytics endpoint for discovery and permission checks. It can fall back to DirectQuery unless `directLakeBehavior: directLakeOnly` is set, does not support Import/DirectQuery/Dual tables in the same semantic model, and generally requires calculated columns/tables and auto date tables to be materialized upstream.
+- **Direct Lake on OneLake** binds to Delta tables in OneLake. It does not use DirectQuery fallback, can support composite models with Import tables, and has different support for calculated tables, unmaterialized calculated columns, and auto date/time. Do not use the SQL source expression below for OneLake mode.
+
+### 4. Convert model metadata to Direct Lake
+
+Minimum shared semantic-model changes:
 
 ```tmdl
 database
@@ -129,10 +155,11 @@ model Model
 	culture: en-US
 	defaultPowerBIDataSourceVersion: powerBI_V3
 	sourceQueryCulture: en-US
-	directLakeBehavior: directLakeOnly
 ```
 
-Add a Fabric source expression:
+For Direct Lake on SQL, add `directLakeBehavior: directLakeOnly` only after the readiness audit confirms the model can run without DirectQuery fallback. For Direct Lake on OneLake, no DirectQuery fallback exists by design.
+
+Add a Fabric source expression for Direct Lake on SQL only:
 
 ```tmdl
 expression DatabaseSource =
@@ -142,6 +169,8 @@ expression DatabaseSource =
 			database
 	lineageTag: <guid>
 ```
+
+For Direct Lake on OneLake, use a OneLake/ADLS Gen2-backed source for Delta tables instead of `Sql.Database`. Keep the partition binding mode-specific and verify the generated TMDL against the current Fabric semantic model definition before publishing.
 
 Convert Import partitions:
 
@@ -157,15 +186,16 @@ partition <TableName> = entity
 Acceptance checks:
 
 - all analytical table partitions are `mode: directLake`
-- no `mode: import` remains unless explicitly documented as an approved composite-model exception
+- for Direct Lake on SQL, no `mode: import` remains in the same semantic model
+- for Direct Lake on OneLake, any Import partition is documented as an intentional composite-model exception
 - no unsupported calculated columns/tables remain for the selected Direct Lake mode
 - service metadata confirms Direct Lake after publish
 
-### 4. Date handling
+### 5. Date handling
 
-Auto-generated local date tables are a common Direct Lake migration failure.
+Auto-generated local date tables are a common Direct Lake on SQL migration failure. Direct Lake on OneLake supports auto date/time, so preserve existing date hierarchy behavior unless the report requirements or validation results require physical date tables.
 
-Recommended safe path:
+Recommended safe path for Direct Lake on SQL:
 
 - Materialize role-playing date tables in the Fabric source, one per date role if necessary.
 - Preserve visual references and date hierarchies by either:
@@ -174,7 +204,7 @@ Recommended safe path:
 - Bound date tables to the actual source date min/max when possible to avoid confusing future years in slicers.
 - Preserve hierarchy names if visuals refer to `Date Hierarchy`.
 
-### 5. DAX regression
+### 6. DAX regression
 
 Measures remain DAX, but context and storage assumptions can change in Direct Lake. Build a validation matrix:
 
@@ -227,11 +257,15 @@ Report `definition.pbir` for service binding:
   "version": "4.0",
   "datasetReference": {
     "byConnection": {
-      "connectionString": "Data Source=powerbi://api.powerbi.com/v1.0/myorg/<workspaceId>;Initial Catalog=<semantic-model-display-name>;semanticModelId=<semantic-model-id>"
+      "connectionString": "semanticmodelid=<semantic-model-id>"
     }
   }
 }
 ```
+
+When deploying through Fabric REST APIs, use the minimal `semanticmodelid` connection string. Full local `byConnection` strings use the workspace display name in the `powerbi://api.powerbi.com/v1.0/myorg/...` path, not the workspace ID.
+
+Fabric item create/update calls can return `202 Accepted` for a long-running operation. When that happens, capture `Location`, `x-ms-operation-id`, and `Retry-After`; poll the operation until it reaches `Succeeded` or `Failed`, respecting `Retry-After`. Do not move items, trigger Direct Lake framing, or validate metadata until the operation succeeds.
 
 Use `folderId` when creating items, or move items after update:
 

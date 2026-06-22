@@ -66,7 +66,7 @@ Do not commit real tenant IDs, workspace IDs, server names, customer names, API 
 
 ## Direct Lake migration expectations
 
-Direct Lake migration is not a simple connector replacement. It changes where table shaping happens and can affect DAX behavior.
+Direct Lake migration is not a simple connector replacement. It changes where table shaping happens and can affect DAX behavior. Choose the Direct Lake mode before editing model metadata: Direct Lake on SQL and Direct Lake on OneLake use different source bindings, fallback behavior, composite-model support, and calculated/date feature support.
 
 The skill requires a readiness audit before publishing:
 
@@ -83,7 +83,7 @@ The skill requires a readiness audit before publishing:
 - RLS/OLS rules
 - DirectQuery fallback behavior
 
-Unsupported Import-mode logic should be moved upstream into Fabric Warehouse/Lakehouse physical tables before Direct Lake binding.
+Unsupported Import-mode logic should be moved upstream into Fabric Warehouse/Lakehouse physical tables before Direct Lake binding. Treat support for calculated columns, calculated tables, composite Import exceptions, and auto date/time as mode-specific rather than universal.
 
 ## Publishing convention
 
@@ -118,10 +118,11 @@ A deployment is complete only after current service evidence exists:
 
 1. Fabric item metadata confirms expected names, IDs, workspace, and folders.
 2. Semantic model definition confirms Direct Lake partitions and no unexpected Import partitions.
-3. Direct Lake refresh/framing succeeds or any fallback/exception is explicitly documented.
-4. DAX regression validates representative metrics for every report page.
-5. A published-service report export or screenshots confirm the report renders.
-6. Source scans confirm no environment-specific source strings or generic-repo-forbidden identifiers are embedded.
+3. Fabric create/update long-running operations are complete before folder moves, Direct Lake refresh/framing, or validation.
+4. Direct Lake refresh/framing succeeds or any fallback/exception is explicitly documented.
+5. DAX regression validates representative metrics for every report page.
+6. A published-service report export or screenshots confirm the report renders.
+7. Source scans confirm no environment-specific source strings or generic-repo-forbidden identifiers are embedded.
 
 Final output should include:
 
